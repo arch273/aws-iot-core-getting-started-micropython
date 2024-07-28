@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import ujson
 import machine
@@ -51,7 +52,14 @@ if not wlan.isconnected():
     print('Connection successful')
     print('Network config:', wlan.ifconfig())
 
-def mqtt_connect(client=client_id, endpoint=aws_endpoint, key=private_key, cert=private_cert, ca=ca_cert):
+def connect_to_iot(mqtt_client):
+    print("Connecting to AWS IoT...")
+    mqtt_client.connect()
+    print("Done")
+    return mqtt_client
+
+# used for micropython 1.23 and above
+def mqtt_connect_new(client=client_id, endpoint=aws_endpoint, key=private_key, cert=private_cert, ca=ca_cert):
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 
     # cert and key must be strings if using a file path.
@@ -63,10 +71,18 @@ def mqtt_connect(client=client_id, endpoint=aws_endpoint, key=private_key, cert=
     ctx.verify_mode = ssl.CERT_REQUIRED
 
     mqtt = MQTTClient(client_id=client, server=endpoint, port=8883, keepalive=1200, ssl=ctx)
-    print("Connecting to AWS IoT...")
-    mqtt.connect()
-    print("Done")
-    return mqtt
+    return connect_to_iot(mqtt)
+
+# used for micropython 1.22 and below
+def mqtt_connect(client=client_id, endpoint=aws_endpoint):
+    with open(private_key, 'r') as f:
+        key = f.read()
+    with open(private_cert, 'r') as f:
+        cert = f.read()
+
+    sslp = {"key": key, "cert": cert, "server_side": False}
+    mqtt = MQTTClient(client_id=client, server=endpoint, port=8883, keepalive=1200, ssl=True, ssl_params=sslp)
+    return connect_to_iot(mqtt)
 
 def mqtt_publish(client, topic=topic_pub, message=''):
     print("Publishing message...")
@@ -83,6 +99,14 @@ def mqtt_subscribe(topic, msg):
 
 def led_state(message):
     led.value(message['state']['led']['onboard'])
+
+# determine micropython version
+# change the connection implementation if 1.23+ due to a breaking change with ssl
+# see: https://github.com/micropython/micropython-lib/pull/793
+if sys.implementation.version[1] >= 23:
+    mqtt_connect = mqtt_connect_new
+else:
+    mqtt_connect = mqtt_connect
 
 #We use our helper function to connect to AWS IoT Core.
 #The callback function mqtt_subscribe is what will be called if we 
